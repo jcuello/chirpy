@@ -14,18 +14,18 @@ func main() {
 	serveMux := http.ServeMux{}
 	server := http.Server{}
 	cfg := &apiConfig{}
-	urlPrefix := "/app/"
-	appFileServerHandler := http.StripPrefix(urlPrefix, http.FileServer(http.Dir(".")))
+	appUrlPrefix := "/app/"
+	appFileServerHandler := http.StripPrefix(appUrlPrefix, http.FileServer(http.Dir(".")))
 
-	serveMux.Handle(urlPrefix, cfg.middlewareMetricsInc(appFileServerHandler))
-	serveMux.HandleFunc("/healthz", func(resp http.ResponseWriter, request *http.Request) {
+	serveMux.Handle(appUrlPrefix, cfg.middlewareMetricsInc(appFileServerHandler))
+	serveMux.HandleFunc("GET /api/healthz", func(resp http.ResponseWriter, request *http.Request) {
 		resp.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		resp.WriteHeader(http.StatusOK)
-		resp.Write([]byte("OK"))
+		resp.Write([]byte("OK\n"))
 
 	})
-	serveMux.HandleFunc("/metrics", cfg.viewMetrics())
-	serveMux.HandleFunc("/reset", cfg.resetMetrics())
+	serveMux.HandleFunc("GET /admin/metrics", cfg.viewMetrics())
+	serveMux.HandleFunc("POST /admin/reset", cfg.resetMetrics())
 
 	server.Handler = &serveMux
 	server.Addr = ":8080"
@@ -43,9 +43,9 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 
 func (cfg *apiConfig) viewMetrics() http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		response := fmt.Sprintf("Hits: %v", cfg.fileserverHits.Load())
+		response := fmt.Sprintf("<html><body><h1>Welcome, Chirpy Admin</h1><p>Chirpy has been visited %d times!</p></body></html>", cfg.fileserverHits.Load())
 		w.Write([]byte(response))
 	})
 }
@@ -55,7 +55,7 @@ func (cfg *apiConfig) resetMetrics() http.HandlerFunc {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		cfg.fileserverHits.Store(0)
-		response := fmt.Sprintf("Hits: %v", cfg.fileserverHits.Load())
+		response := fmt.Sprintf("Hits: %v\n", cfg.fileserverHits.Load())
 		w.Write([]byte(response))
 	})
 }
