@@ -1,13 +1,29 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync/atomic"
+	"unicode/utf8"
 )
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
+}
+
+type chirp struct {
+	Body string `json:"body"`
+}
+
+type chirpError struct {
+	Error string `json:"error"`
+}
+
+var somethingWentWrongResponse = chirpError{Error: "Something went wrong"}
+
+type chirpValid struct {
+	Valid bool `json:"valid"`
 }
 
 func main() {
@@ -24,6 +40,28 @@ func main() {
 		resp.Write([]byte("OK\n"))
 
 	})
+	serveMux.HandleFunc("POST /api/validate_chirp", func(w http.ResponseWriter, r *http.Request) {
+		respBody := chirp{}
+		defer r.Body.Close()
+
+		decoder := json.NewDecoder(r.Body)
+		err := decoder.Decode(&respBody)
+
+		w.Header().Set("Content-Type", "application/json")
+		if err != nil {
+			respondWithError(w, 400, "Invalid body")
+			return
+		}
+
+		if utf8.RuneCountInString(respBody.Body) > 140 {
+			respondWithError(w, 400, "Chirp is too long")
+			return
+		}
+
+		respondWithJson(w, 200, chirpValid{Valid: true})
+
+	})
+
 	serveMux.HandleFunc("GET /admin/metrics", cfg.viewMetrics())
 	serveMux.HandleFunc("POST /admin/reset", cfg.resetMetrics())
 
@@ -58,4 +96,28 @@ func (cfg *apiConfig) resetMetrics() http.HandlerFunc {
 		response := fmt.Sprintf("Hits: %v\n", cfg.fileserverHits.Load())
 		w.Write([]byte(response))
 	})
+}
+
+func respondWithError(w http.ResponseWriter, statusCode int, msg string) {
+	w.WriteHeader(statusCode)
+	data, err := json.Marshal(chirpError{Error: msg})
+	if err != nil {
+		d, _ := json.Marshal(somethingWentWrongResponse)
+		fmt.Printf("%v\n", err)
+		w.Write(d)
+	} else {
+		w.Write(data)
+	}
+}
+
+func respondWithJson(w http.ResponseWriter, statusCode int, payload interface{}) {
+	w.WriteHeader(statusCode)
+	data, err := json.Marshal(payload)
+	if err != nil {
+		d, _ := json.Marshal(somethingWentWrongResponse)
+		fmt.Printf("%v\n", err)
+		w.Write(d)
+	} else {
+		w.Write(data)
+	}
 }
