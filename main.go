@@ -1,18 +1,25 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"sync/atomic"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/jcuello/chirpy/internal/database"
+	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 )
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
+	dbQueries      *database.Queries
 }
 
 type chirp struct {
@@ -30,9 +37,20 @@ type chirpValid struct {
 }
 
 func main() {
+	godotenv.Load()
+	dbURL := os.Getenv("DB_URL")
+	db, err := sql.Open("postgres", dbURL)
+
+	if err != nil {
+		fmt.Printf("Unable to connect to database %v\n", err)
+		os.Exit(1)
+	}
+
+	dbQueries := database.New(db)
+
 	serveMux := http.ServeMux{}
 	server := http.Server{}
-	cfg := &apiConfig{}
+	cfg := &apiConfig{dbQueries: dbQueries}
 	appUrlPrefix := "/app/"
 	appFileServerHandler := http.StripPrefix(appUrlPrefix, http.FileServer(http.Dir(".")))
 
