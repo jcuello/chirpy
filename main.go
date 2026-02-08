@@ -4,7 +4,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
+	"strings"
 	"sync/atomic"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -13,7 +16,7 @@ type apiConfig struct {
 }
 
 type chirp struct {
-	Body string `json:"body"`
+	Body *string `json:"body"`
 }
 
 type chirpError struct {
@@ -23,7 +26,7 @@ type chirpError struct {
 var somethingWentWrongResponse = chirpError{Error: "Something went wrong"}
 
 type chirpValid struct {
-	Valid bool `json:"valid"`
+	CleanedBody string `json:"cleaned_body"`
 }
 
 func main() {
@@ -48,17 +51,18 @@ func main() {
 		err := decoder.Decode(&respBody)
 
 		w.Header().Set("Content-Type", "application/json")
-		if err != nil {
+		if err != nil || respBody.Body == nil {
 			respondWithError(w, 400, "Invalid body")
 			return
 		}
 
-		if utf8.RuneCountInString(respBody.Body) > 140 {
+		if utf8.RuneCountInString(*respBody.Body) > 140 {
 			respondWithError(w, 400, "Chirp is too long")
 			return
 		}
 
-		respondWithJson(w, 200, chirpValid{Valid: true})
+		cleanedBody := cleanChirpBody(*respBody.Body)
+		respondWithJson(w, 200, chirpValid{CleanedBody: cleanedBody})
 
 	})
 
@@ -70,6 +74,30 @@ func main() {
 
 	server.ListenAndServe()
 
+}
+
+func cleanChirpBody(body string) string {
+	badWords := []string{"kerfuffle", "sharbert", "fornax"}
+	words := strings.Split(body, " ")
+	results := []string{}
+	for _, word := range words {
+		lowered := strings.ToLower(word)
+		hasPunct := false
+
+		for _, char := range lowered {
+			if unicode.IsPunct(char) {
+				hasPunct = true
+				break
+			}
+		}
+
+		if !hasPunct && slices.Contains(badWords, lowered) {
+			results = append(results, "****")
+		} else {
+			results = append(results, word)
+		}
+	}
+	return strings.Join(results, " ")
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
