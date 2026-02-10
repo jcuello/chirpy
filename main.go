@@ -86,7 +86,9 @@ func main() {
 
 	})
 	serveMux.HandleFunc("POST /api/chirps", handlePostChirp)
+	serveMux.HandleFunc("GET /api/chirps", handleGetChirps)
 	serveMux.HandleFunc("POST /api/users", handlePostUser)
+
 	serveMux.HandleFunc("GET /admin/metrics", cfg.viewMetrics())
 	serveMux.HandleFunc("POST /admin/reset", cfg.resetMetrics())
 
@@ -256,4 +258,28 @@ func handlePostUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondWithJson(w, 201, user)
+}
+
+func handleGetChirps(w http.ResponseWriter, r *http.Request) {
+
+	chirps, err := cfg.db.GetAllChirps(r.Context())
+
+	if err != nil {
+		respondWithError(w, 500, "Unable to get chirps.")
+		return
+	}
+
+	chirpsResult := []chirpCreated{}
+
+	for _, c := range chirps {
+		chirpsResult = append(chirpsResult, chirpCreated{
+			Id:        c.ID,
+			CreatedAt: c.CreatedAt.Time,
+			UpdatedAt: c.UpdatedAt.Time,
+			Body:      &c.Body.String,
+			UserId:    c.UserID.UUID.String(),
+		})
+	}
+
+	respondWithJson(w, 200, chirpsResult)
 }
