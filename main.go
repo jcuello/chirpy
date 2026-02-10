@@ -24,7 +24,7 @@ type apiConfig struct {
 	db             *database.Queries
 }
 
-type chirp struct {
+type chirpPost struct {
 	Body   *string `json:"body"`
 	UserId string  `json:"user_id"`
 }
@@ -53,10 +53,6 @@ type UserPost struct {
 }
 
 var somethingWentWrongResponse = chirpError{Error: "Something went wrong"}
-
-type chirpValid struct {
-	CleanedBody string `json:"cleaned_body"`
-}
 
 var cfg apiConfig = apiConfig{}
 
@@ -87,6 +83,7 @@ func main() {
 	})
 	serveMux.HandleFunc("POST /api/chirps", handlePostChirp)
 	serveMux.HandleFunc("GET /api/chirps", handleGetChirps)
+	serveMux.HandleFunc("GET /api/chirps/{chirpID}", handleGetSingleChirps)
 	serveMux.HandleFunc("POST /api/users", handlePostUser)
 
 	serveMux.HandleFunc("GET /admin/metrics", cfg.viewMetrics())
@@ -187,7 +184,7 @@ func respondWithJson(w http.ResponseWriter, statusCode int, payload interface{})
 }
 
 func handlePostChirp(w http.ResponseWriter, r *http.Request) {
-	respBody := chirp{}
+	respBody := chirpPost{}
 	defer r.Body.Close()
 
 	decoder := json.NewDecoder(r.Body)
@@ -261,7 +258,6 @@ func handlePostUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleGetChirps(w http.ResponseWriter, r *http.Request) {
-
 	chirps, err := cfg.db.GetAllChirps(r.Context())
 
 	if err != nil {
@@ -279,6 +275,32 @@ func handleGetChirps(w http.ResponseWriter, r *http.Request) {
 			Body:      &c.Body.String,
 			UserId:    c.UserID.UUID.String(),
 		})
+	}
+
+	respondWithJson(w, 200, chirpsResult)
+}
+
+func handleGetSingleChirps(w http.ResponseWriter, r *http.Request) {
+	chirpId := r.PathValue("chirpID")
+	chirpUUID, err := uuid.Parse(chirpId)
+
+	if len(chirpId) == 0 || err != nil {
+		respondWithError(w, 400, "Invalid chirp ID")
+		return
+	}
+
+	c, err := cfg.db.GetChirp(r.Context(), chirpUUID)
+	if !c.UserID.Valid {
+		respondWithError(w, 404, "Chirp not found.")
+		return
+	}
+
+	chirpsResult := chirpCreated{
+		Id:        c.ID,
+		CreatedAt: c.CreatedAt.Time,
+		UpdatedAt: c.UpdatedAt.Time,
+		Body:      &c.Body.String,
+		UserId:    c.UserID.UUID.String(),
 	}
 
 	respondWithJson(w, 200, chirpsResult)
