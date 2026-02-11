@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/jcuello/chirpy/internal/auth"
 	"github.com/jcuello/chirpy/internal/database"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
@@ -48,8 +49,14 @@ type User struct {
 	Email     string    `json:"email"`
 }
 
+type UserLogin struct {
+	Password string `json:"password"`
+	Email    string `json:"email"`
+}
+
 type UserPost struct {
-	Email string `json:"email"`
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
 var somethingWentWrongResponse = chirpError{Error: "Something went wrong"}
@@ -85,6 +92,7 @@ func main() {
 	serveMux.HandleFunc("GET /api/chirps", handleGetChirps)
 	serveMux.HandleFunc("GET /api/chirps/{chirpID}", handleGetSingleChirps)
 	serveMux.HandleFunc("POST /api/users", handlePostUser)
+	serveMux.HandleFunc("POST /api/login", handleLogin)
 
 	serveMux.HandleFunc("GET /admin/metrics", cfg.viewMetrics())
 	serveMux.HandleFunc("POST /admin/reset", cfg.resetMetrics())
@@ -171,6 +179,10 @@ func respondWithError(w http.ResponseWriter, statusCode int, msg string) {
 	}
 }
 
+func respondWithInternalServerError(w http.ResponseWriter) {
+	respondWithError(w, 500, "Internal Server Error")
+}
+
 func respondWithJson(w http.ResponseWriter, statusCode int, payload interface{}) {
 	w.WriteHeader(statusCode)
 	data, err := json.Marshal(payload)
@@ -235,12 +247,22 @@ func handlePostUser(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
 	err := decoder.Decode(&respBody)
 
-	if err != nil || respBody.Email == "" {
+	if err != nil || respBody.Email == "" || respBody.Password == "" {
 		respondWithError(w, 400, "Invalid body")
 		return
 	}
 
-	dbUser, err := cfg.db.CreateUser(r.Context(), sql.NullString{String: respBody.Email, Valid: true})
+	hash, err := auth.HashPassword(respBody.Password)
+	if err != nil {
+		respondWithInternalServerError(w)
+		return
+	}
+
+	dbUser, err := cfg.db.CreateUser(r.Context(),
+		database.CreateUserParams{
+			Email:          sql.NullString{String: respBody.Email, Valid: true},
+			HashedPassword: hash,
+		})
 
 	if err != nil {
 		respondWithError(w, 500, "Unable to create user")
@@ -304,4 +326,40 @@ func handleGetSingleChirps(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondWithJson(w, 200, chirpsResult)
+}
+
+func handleLogin(w http.ResponseWriter, r *http.Request) {
+	userLogin := UserLogin{}
+	defer r.Body.Close()
+
+	decoder := json.NewDecoder(r.Body)
+	decodeErr := decoder.Decode(&userLogin)
+	if decodeErr != nil || userLogin.Email == "" || userLogin.Password == "" {
+		respondWithError(w, 400, "Invalid body")
+		return
+	}
+
+	user, err := cfg.db.GetUser(r.Context(), sql.NullString{String: userLogin.Email, Valid: true})
+	if err != nil {
+		respondWithInternalServerError(w)
+		return
+	}
+
+	passMatch, err := auth.CheckPasswordHash(userLogin.Password, user.HashedPassword)
+	if err != nil {
+		respondWithInternalServerError(w)
+		return
+	}
+
+	if !passMatch {
+		respondWithError(w, 401, "Incorrect email or password")
+		return
+	}
+
+	respondWithJson(w, 200, User{
+		ID:        user.ID,
+		CreatedAt: user.CreatedAt.Time,
+		UpdatedAt: user.UpdatedAt.Time,
+		Email:     user.Email.String,
+	})
 }
