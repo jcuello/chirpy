@@ -23,11 +23,11 @@ import (
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	db             *database.Queries
+	jwtSecret      string
 }
 
 type chirpPost struct {
-	Body   *string `json:"body"`
-	UserId string  `json:"user_id"`
+	Body *string `json:"body"`
 }
 
 type chirpCreated struct {
@@ -47,11 +47,13 @@ type User struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Email     string    `json:"email"`
+	Token     string    `json:"token"`
 }
 
 type UserLogin struct {
-	Password string `json:"password"`
-	Email    string `json:"email"`
+	Password         string `json:"password"`
+	Email            string `json:"email"`
+	ExpiresInSeconds int    `json:"expires_in_seconds,omitempty"`
 }
 
 type UserPost struct {
@@ -78,6 +80,7 @@ func main() {
 	serveMux := http.ServeMux{}
 	server := http.Server{}
 	cfg.db = dbQueries
+	cfg.jwtSecret = os.Getenv("JWT_SECRET")
 	appUrlPrefix := "/app/"
 	appFileServerHandler := http.StripPrefix(appUrlPrefix, http.FileServer(http.Dir(".")))
 
@@ -196,11 +199,23 @@ func respondWithJson(w http.ResponseWriter, statusCode int, payload interface{})
 }
 
 func handlePostChirp(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "Unauthorized")
+		return
+	}
+
+	userId, err := auth.ValidateJWT(token, cfg.jwtSecret)
+	if err != nil {
+		respondWithError(w, 401, "Unauthorized")
+		return
+	}
+
 	respBody := chirpPost{}
 	defer r.Body.Close()
 
 	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&respBody)
+	err = decoder.Decode(&respBody)
 
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil || respBody.Body == nil {
@@ -214,16 +229,10 @@ func handlePostChirp(w http.ResponseWriter, r *http.Request) {
 	}
 
 	cleanedBody := cleanChirpBody(*respBody.Body)
-	userUUID, err := uuid.Parse(respBody.UserId)
-
-	if err != nil {
-		respondWithError(w, 400, "Invalid user_id")
-		return
-	}
 
 	chirp, err := cfg.db.CreateChirp(r.Context(), database.CreateChirpParams{
 		Body:   sql.NullString{String: cleanedBody, Valid: true},
-		UserID: uuid.NullUUID{UUID: userUUID, Valid: true},
+		UserID: uuid.NullUUID{UUID: userId, Valid: true},
 	})
 
 	if err != nil {
@@ -236,7 +245,7 @@ func handlePostChirp(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: chirp.CreatedAt.Time,
 		UpdatedAt: chirp.UpdatedAt.Time,
 		Body:      &chirp.Body.String,
-		UserId:    chirp.UserID.UUID.String(),
+		UserId:    userId.String(),
 	})
 }
 
@@ -356,10 +365,22 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	expiresInSeconds := 1200 * time.Second
+	if userLogin.ExpiresInSeconds > 0 {
+		expiresInSeconds = min(expiresInSeconds, time.Duration(userLogin.ExpiresInSeconds))
+	}
+
+	token, err := auth.MakeJWT(user.ID, cfg.jwtSecret, expiresInSeconds)
+	if err != nil {
+		respondWithInternalServerError(w)
+		return
+	}
+
 	respondWithJson(w, 200, User{
 		ID:        user.ID,
 		CreatedAt: user.CreatedAt.Time,
 		UpdatedAt: user.UpdatedAt.Time,
 		Email:     user.Email.String,
+		Token:     token,
 	})
 }
