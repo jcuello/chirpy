@@ -43,17 +43,18 @@ type chirpError struct {
 }
 
 type User struct {
-	ID        uuid.UUID `json:"id"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Email     string    `json:"email"`
-	Token     string    `json:"token"`
+	ID           uuid.UUID `json:"id"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	Email        string    `json:"email"`
+	Token        string    `json:"token"`
+	RefreshToken string    `json:"refresh_token"`
 }
 
 type UserLogin struct {
-	Password         string `json:"password"`
-	Email            string `json:"email"`
-	ExpiresInSeconds int    `json:"expires_in_seconds,omitempty"`
+	Password     string `json:"password"`
+	Email        string `json:"email"`
+	RefreshToken string `json:"refresh_token"`
 }
 
 type UserPost struct {
@@ -96,6 +97,8 @@ func main() {
 	serveMux.HandleFunc("GET /api/chirps/{chirpID}", handleGetSingleChirps)
 	serveMux.HandleFunc("POST /api/users", handlePostUser)
 	serveMux.HandleFunc("POST /api/login", handleLogin)
+	serveMux.HandleFunc("POST /api/refresh", handleRefresh)
+	serveMux.HandleFunc("POST /api/revoke", handleRevoke)
 
 	serveMux.HandleFunc("GET /admin/metrics", cfg.viewMetrics())
 	serveMux.HandleFunc("POST /admin/reset", cfg.resetMetrics())
@@ -315,14 +318,18 @@ func handleGetSingleChirps(w http.ResponseWriter, r *http.Request) {
 	chirpId := r.PathValue("chirpID")
 	chirpUUID, err := uuid.Parse(chirpId)
 
-	if len(chirpId) == 0 || err != nil {
+	if chirpId == "" || err != nil {
 		respondWithError(w, 400, "Invalid chirp ID")
 		return
 	}
 
 	c, err := cfg.db.GetChirp(r.Context(), chirpUUID)
-	if !c.UserID.Valid {
-		respondWithError(w, 404, "Chirp not found.")
+	if err != nil {
+		if err == sql.ErrNoRows {
+			respondWithError(w, 404, "Chirp not found.")
+		} else {
+			respondWithInternalServerError(w)
+		}
 		return
 	}
 
@@ -365,22 +372,87 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	expiresInSeconds := 1200 * time.Second
-	if userLogin.ExpiresInSeconds > 0 {
-		expiresInSeconds = min(expiresInSeconds, time.Duration(userLogin.ExpiresInSeconds))
+	accessTokenExpiration := 60 * time.Minute
+	token, err := auth.MakeJWT(user.ID, cfg.jwtSecret, accessTokenExpiration)
+	if err != nil {
+		respondWithInternalServerError(w)
+		return
 	}
 
-	token, err := auth.MakeJWT(user.ID, cfg.jwtSecret, expiresInSeconds)
+	refreshToken, err := auth.MakeRefreshToken()
+	if err != nil {
+		respondWithInternalServerError(w)
+		return
+	}
+
+	_, err = cfg.db.CreateRefreshToken(r.Context(), database.CreateRefreshTokenParams{
+		Token:     refreshToken,
+		UserID:    uuid.NullUUID{UUID: user.ID, Valid: true},
+		ExpiresAt: sql.NullTime{Time: time.Now().Add(60 * 24 * time.Hour), Valid: true},
+	})
 	if err != nil {
 		respondWithInternalServerError(w)
 		return
 	}
 
 	respondWithJson(w, 200, User{
-		ID:        user.ID,
-		CreatedAt: user.CreatedAt.Time,
-		UpdatedAt: user.UpdatedAt.Time,
-		Email:     user.Email.String,
-		Token:     token,
+		ID:           user.ID,
+		CreatedAt:    user.CreatedAt.Time,
+		UpdatedAt:    user.UpdatedAt.Time,
+		Email:        user.Email.String,
+		Token:        token,
+		RefreshToken: refreshToken,
 	})
+}
+
+func handleRefresh(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "Unauthorized")
+		return
+	}
+
+	refreshToken, err := cfg.db.GetUserFromRefreshToken(r.Context(), token)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			respondWithError(w, 401, "Unauthorized")
+		} else {
+			respondWithInternalServerError(w)
+		}
+		return
+	}
+
+	newToken, err := auth.MakeJWT(refreshToken.UserID.UUID, cfg.jwtSecret, 60*time.Minute)
+
+	respondWithJson(w, 200, struct {
+		Token string `json:"token"`
+	}{
+		Token: newToken,
+	})
+}
+
+func handleRevoke(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "Unauthorized")
+		return
+	}
+
+	refreshToken, err := cfg.db.GetUserFromRefreshToken(r.Context(), token)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			respondWithError(w, 401, "Unauthorized")
+		} else {
+			respondWithInternalServerError(w)
+		}
+		return
+	}
+
+	err = cfg.db.RevokeRefreshToken(r.Context(), refreshToken.Token)
+	if err != nil {
+		respondWithInternalServerError(w)
+		return
+	}
+
+	respondWithJson(w, 204, struct{}{})
 }
