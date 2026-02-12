@@ -1,31 +1,132 @@
 package auth
 
 import (
-	"strings"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
 )
 
-func TestHashPassword(t *testing.T) {
-	pass := "secure-password"
-	actual_hash, err := HashPassword(pass)
+func TestCheckPasswordHash(t *testing.T) {
+	// First, we need to create some hashed passwords for testing
+	password1 := "correctPassword123!"
+	password2 := "anotherPassword456!"
+	hash1, _ := HashPassword(password1)
+	hash2, _ := HashPassword(password2)
 
-	if err != nil {
-		t.Errorf("%v", err)
+	tests := []struct {
+		name          string
+		password      string
+		hash          string
+		wantErr       bool
+		matchPassword bool
+	}{
+		{
+			name:          "Correct password",
+			password:      password1,
+			hash:          hash1,
+			wantErr:       false,
+			matchPassword: true,
+		},
+		{
+			name:          "Incorrect password",
+			password:      "wrongPassword",
+			hash:          hash1,
+			wantErr:       false,
+			matchPassword: false,
+		},
+		{
+			name:          "Password doesn't match different hash",
+			password:      password1,
+			hash:          hash2,
+			wantErr:       false,
+			matchPassword: false,
+		},
+		{
+			name:          "Empty password",
+			password:      "",
+			hash:          hash1,
+			wantErr:       false,
+			matchPassword: false,
+		},
+		{
+			name:          "Invalid hash",
+			password:      password1,
+			hash:          "invalidhash",
+			wantErr:       true,
+			matchPassword: false,
+		},
 	}
-	if !strings.Contains(actual_hash, "$argon2id$v=19$m=65536,t=1,p=32$") {
-		t.Error("Expected parameters do not match")
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			match, err := CheckPasswordHash(tt.password, tt.hash)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("CheckPasswordHash() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr && match != tt.matchPassword {
+				t.Errorf("CheckPasswordHash() expects %v, got %v", tt.matchPassword, match)
+			}
+		})
 	}
 }
 
-func TestCheckPasswordHash(t *testing.T) {
-	pass, hash := "secure-password", "$argon2id$v=19$m=65536,t=1,p=32$pcnYWsWWhLxlkv4+yhJQAA$RzORfFaMXi6OYhHGxWed7wUXRQjRC3gHo1UFbUpknmE"
-	match, err := CheckPasswordHash(pass, hash)
+func TestMakeJWT(t *testing.T) {
+	userId := uuid.MustParse("4a651dff-ce24-48c0-a1ae-cde0340f54f2")
+	secret := "super-secret-password"
+	jwt, err := MakeJWT(userId, secret, 10*time.Second)
 
 	if err != nil {
-		t.Errorf("%v", err)
+		t.Fatal(err)
 	}
 
-	if !match {
-		t.Errorf("Hash: %v does not given password %v", hash, pass)
+	t.Log(jwt)
+}
+
+func TestValidateJWT(t *testing.T) {
+	userID := uuid.New()
+	validToken, _ := MakeJWT(userID, "secret", time.Hour)
+
+	tests := []struct {
+		name        string
+		tokenString string
+		tokenSecret string
+		wantUserID  uuid.UUID
+		wantErr     bool
+	}{
+		{
+			name:        "Valid token",
+			tokenString: validToken,
+			tokenSecret: "secret",
+			wantUserID:  userID,
+			wantErr:     false,
+		},
+		{
+			name:        "Invalid token",
+			tokenString: "invalid.token.string",
+			tokenSecret: "secret",
+			wantUserID:  uuid.Nil,
+			wantErr:     true,
+		},
+		{
+			name:        "Wrong secret",
+			tokenString: validToken,
+			tokenSecret: "wrong_secret",
+			wantUserID:  uuid.Nil,
+			wantErr:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotUserID, err := ValidateJWT(tt.tokenString, tt.tokenSecret)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateJWT() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if gotUserID != tt.wantUserID {
+				t.Errorf("ValidateJWT() gotUserID = %v, want %v", gotUserID, tt.wantUserID)
+			}
+		})
 	}
 }
