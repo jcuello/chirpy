@@ -47,8 +47,8 @@ type User struct {
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 	Email        string    `json:"email"`
-	Token        string    `json:"token"`
-	RefreshToken string    `json:"refresh_token"`
+	Token        string    `json:"token,omitempty"`
+	RefreshToken string    `json:"refresh_token,omitempty"`
 }
 
 type UserLogin struct {
@@ -95,7 +95,10 @@ func main() {
 	serveMux.HandleFunc("POST /api/chirps", handlePostChirp)
 	serveMux.HandleFunc("GET /api/chirps", handleGetChirps)
 	serveMux.HandleFunc("GET /api/chirps/{chirpID}", handleGetSingleChirps)
+
 	serveMux.HandleFunc("POST /api/users", handlePostUser)
+	serveMux.HandleFunc("PUT /api/users", handlePutChirp)
+
 	serveMux.HandleFunc("POST /api/login", handleLogin)
 	serveMux.HandleFunc("POST /api/refresh", handleRefresh)
 	serveMux.HandleFunc("POST /api/revoke", handleRevoke)
@@ -455,4 +458,52 @@ func handleRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 
 	respondWithJson(w, 204, struct{}{})
+}
+
+func handlePutChirp(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "Unauthorized")
+		return
+	}
+
+	userId, err := auth.ValidateJWT(token, cfg.jwtSecret)
+	if err != nil {
+		respondWithError(w, 401, "Unauthorized")
+		return
+	}
+
+	defer r.Body.Close()
+
+	body := UserPost{}
+	decoder := json.NewDecoder(r.Body)
+	err = decoder.Decode(&body)
+	if err != nil {
+		respondWithError(w, 400, "Invalid body.")
+		return
+	}
+
+	newHashedPass, err := auth.HashPassword(body.Password)
+	if err != nil {
+		respondWithInternalServerError(w)
+		return
+	}
+
+	err = cfg.db.UpdateUserPassword(r.Context(), database.UpdateUserPasswordParams{
+		Email:          sql.NullString{String: body.Email, Valid: true},
+		HashedPassword: newHashedPass,
+	})
+
+	if err != nil {
+		respondWithInternalServerError(w)
+		return
+	}
+
+	respondWithJson(w, 200, struct {
+		ID    uuid.UUID `json:"id"`
+		Email string    `json:"email"`
+	}{
+		ID:    userId,
+		Email: body.Email,
+	})
 }
