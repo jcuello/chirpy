@@ -95,6 +95,7 @@ func main() {
 	serveMux.HandleFunc("POST /api/chirps", handlePostChirp)
 	serveMux.HandleFunc("GET /api/chirps", handleGetChirps)
 	serveMux.HandleFunc("GET /api/chirps/{chirpID}", handleGetSingleChirps)
+	serveMux.HandleFunc("DELETE /api/chirps/{chirpID}", handleDeleteChirps)
 
 	serveMux.HandleFunc("POST /api/users", handlePostUser)
 	serveMux.HandleFunc("PUT /api/users", handlePutChirp)
@@ -506,4 +507,50 @@ func handlePutChirp(w http.ResponseWriter, r *http.Request) {
 		ID:    userId,
 		Email: body.Email,
 	})
+}
+
+func handleDeleteChirps(w http.ResponseWriter, r *http.Request) {
+	token, err := auth.GetBearerToken(r.Header)
+	if err != nil {
+		respondWithError(w, 401, "Unauthorized")
+		return
+	}
+
+	userId, err := auth.ValidateJWT(token, cfg.jwtSecret)
+	if err != nil {
+		respondWithError(w, 401, "Unauthorized")
+		return
+	}
+
+	chirpStrId := r.PathValue("chirpID")
+	chirpID, err := uuid.Parse(chirpStrId)
+	if err != nil {
+		respondWithError(w, 400, "Invalid chirpID")
+		return
+	}
+
+	chirp, err := cfg.db.GetChirp(r.Context(), chirpID)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			respondWithError(w, 404, "Chirp Not Found")
+
+		} else {
+			respondWithInternalServerError(w)
+		}
+		return
+	}
+
+	if chirp.UserID.UUID != userId {
+		respondWithError(w, 403, "Unauthorized")
+		return
+	}
+
+	err = cfg.db.DeleteChirp(r.Context(), chirp.ID)
+	if err != nil {
+		respondWithInternalServerError(w)
+		return
+	}
+
+	respondWithJson(w, 204, struct{}{})
 }
