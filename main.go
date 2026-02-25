@@ -47,6 +47,8 @@ func main() {
 	serveMux.HandleFunc("POST /api/users", handlePostUser)
 	serveMux.HandleFunc("PUT /api/users", handlePutChirp)
 
+	serveMux.HandleFunc("POST /api/polka/webhooks", handlePolkaWebhook)
+
 	serveMux.HandleFunc("POST /api/login", handleLogin)
 	serveMux.HandleFunc("POST /api/refresh", handleRefresh)
 	serveMux.HandleFunc("POST /api/revoke", handleRevoke)

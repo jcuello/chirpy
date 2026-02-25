@@ -35,6 +35,7 @@ type User struct {
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 	Email        string    `json:"email"`
+	IsChirpyRed  bool      `json:"is_chirpy_red"`
 	Token        string    `json:"token,omitempty"`
 	RefreshToken string    `json:"refresh_token,omitempty"`
 }
@@ -48,4 +49,17 @@ type UserLogin struct {
 type UserPost struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+}
+
+type UserUpgradedEvent string
+
+const (
+	polkaUserUpgraded UserUpgradedEvent = "user.upgraded"
+)
+
+type UpgradeUser struct {
+	Event UserUpgradedEvent `json:"event"`
+	Data  struct {
+		UserId uuid.UUID `json:"user_id"`
+	} `json:"data"`
 }

@@ -41,10 +41,11 @@ func handlePostUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	user := User{
-		ID:        dbUser.ID,
-		CreatedAt: dbUser.CreatedAt.Time,
-		UpdatedAt: dbUser.UpdatedAt.Time,
-		Email:     dbUser.Email.String,
+		ID:          dbUser.ID,
+		CreatedAt:   dbUser.CreatedAt.Time,
+		UpdatedAt:   dbUser.UpdatedAt.Time,
+		Email:       dbUser.Email.String,
+		IsChirpyRed: dbUser.IsChirpyRed.Bool,
 	}
 
 	respondWithJson(w, 201, user)
@@ -106,6 +107,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:    user.CreatedAt.Time,
 		UpdatedAt:    user.UpdatedAt.Time,
 		Email:        user.Email.String,
+		IsChirpyRed:  user.IsChirpyRed.Bool,
 		Token:        token,
 		RefreshToken: refreshToken,
 	})
