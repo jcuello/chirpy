@@ -29,6 +29,7 @@ func main() {
 	server := http.Server{}
 	cfg.db = dbQueries
 	cfg.jwtSecret = os.Getenv("JWT_SECRET")
+	cfg.polkaApiKey = os.Getenv("POLKA_KEY")
 	appUrlPrefix := "/app/"
 	appFileServerHandler := http.StripPrefix(appUrlPrefix, http.FileServer(http.Dir(".")))
 

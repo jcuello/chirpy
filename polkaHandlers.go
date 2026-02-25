@@ -4,14 +4,22 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+
+	"github.com/jcuello/chirpy/internal/auth"
 )
 
 func handlePolkaWebhook(w http.ResponseWriter, r *http.Request) {
+	key, err := auth.GetAPIKey(r.Header)
+	if key != cfg.polkaApiKey {
+		respondWithError(w, 401, "unauthorized")
+		return
+	}
+
 	upgradeUserEvent := UpgradeUser{}
 	defer r.Body.Close()
 
 	decoder := json.NewDecoder(r.Body)
-	err := decoder.Decode(&upgradeUserEvent)
+	err = decoder.Decode(&upgradeUserEvent)
 
 	if err != nil {
 		respondWithError(w, 400, "invalid body")
