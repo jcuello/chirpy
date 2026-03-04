@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"sort"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -63,11 +65,27 @@ func handlePostChirp(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleGetChirps(w http.ResponseWriter, r *http.Request) {
-	chirps, err := cfg.db.GetAllChirps(r.Context())
+	authorStringId := r.URL.Query().Get("author_id")
+	authorId, _ := uuid.Parse(authorStringId)
+
+	var chirps []database.Chirp
+	var err error
+	if authorStringId == "" {
+		chirps, err = cfg.db.GetAllChirps(r.Context())
+	} else {
+		chirps, err = cfg.db.GetAuthorChirps(r.Context(), uuid.NullUUID{UUID: authorId, Valid: true})
+	}
 
 	if err != nil {
 		respondWithError(w, 500, "Unable to get chirps.")
 		return
+	}
+
+	sortStr := r.URL.Query().Get("sort")
+	if strings.ToLower(sortStr) == "desc" {
+		sort.Slice(chirps, func(i, j int) bool {
+			return chirps[i].CreatedAt.Time.After(chirps[j].CreatedAt.Time)
+		})
 	}
 
 	chirpsResult := []chirpCreated{}
